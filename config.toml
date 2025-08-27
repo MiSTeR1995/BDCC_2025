@@ -1,0 +1,84 @@
+# ---------------------------
+# Настройки корпусов данных
+# ---------------------------
+
+# Паркинсон
+[datasets.wsm_parkinson]
+base_dir = "E:/WSM/"
+csv_path = "{base_dir}/parkinson/{split}_labels.csv"
+video_dir = "{base_dir}/parkinson/{split}_labels/"
+
+
+# Депрессия
+[datasets.wsm_depression]
+base_dir = "E:/WSM/"
+csv_path = "{base_dir}/depression/{split}_labels.csv"
+video_dir = "{base_dir}/depression/{split}_labels/"
+
+# ---------------------------
+# DataLoader параметры
+# ---------------------------
+[dataloader]
+num_workers = 0
+shuffle = true
+prepare_only = true      # только извлечение признаков, без обучения
+
+# ---------------------------
+# Общие параметры тренировки
+# ---------------------------
+[train.general]
+random_seed = 42                  # фиксируем random seed для воспроизводимости (0 = каждый раз разный)
+subset_size = 0                  # ограничение на количество примеров (0 = использовать весь датасет)
+batch_size = 32                   # размер батча
+num_epochs = 100                   # число эпох тренировки
+max_patience = 15                 # максимальное число эпох без улучшений (для Early Stopping)
+save_best_model = true            # сохранять лучшую модель
+save_prepared_data = true         # сохранять извлеченные признаки (эмбеддинги)
+save_feature_path = './features/' # путь для сохранения эмбеддингов
+search_type = "exhaustive"        # стратегия поиска: "greedy", "exhaustive" или "none"
+early_stop_on = "test"            # dev или "test" набор для оптимизации параметров обучения
+checkpoint_dir = "checkpoints"
+device = "cuda"           # "cuda" или "cpu", куда грузить модель
+selection_metric = "mean_all"   # по какой метрике отслеживаем mean_emo или "mF1", "mUAR", "ACC" … mean_combo
+add_similarity = true     # считает косинусное сходство эмбеддингов модальностей (или эмбеддинга к некоторому «гайд-банку»/прототипам классов). Используется в MultiModalFusionModel
+
+# ---------------------------
+# Параметры модели
+# ---------------------------
+[train.model]
+experiment_name            = "MultiModalFusionModel" # название модели
+hidden_dim            = 256      # размер скрытого состояния
+num_transformer_heads = 8        # количество attention голов в трансформере
+positional_encoding   = false    # использовать ли позиционное кодирование
+dropout               = 0.2     # dropout между слоями
+out_features          = 256      # размер финальных признаков перед классификацией
+
+# ---------------------------
+# Параметры оптимизатора
+# ---------------------------
+[train.optimizer]
+optimizer = "adam"        # тип оптимизатора: "adam", "adamw", "lion", "sgd", "rmsprop"
+lr = 1e-4                 # начальная скорость обучения
+weight_decay = 1e-5        # weight decay для регуляризации
+momentum = 0.9            # momentum (используется только в SGD)
+
+# ---------------------------
+# Параметры шедулера
+# ---------------------------
+[train.scheduler]
+scheduler_type = "plateau" # тип шедулера: "none", "plateau", "cosine", "onecycle" ил  и HuggingFace-стиль ("huggingface_linear", "huggingface_cosine" "huggingface_cosine_with_restarts" и т.д.)
+warmup_ratio = 0.1         # отношение количества warmup-итераций к общему числу шагов (0.1 = 10%)
+
+[embeddings]
+average_features = "mean_std" # Усредненние фичей - "mean"| "mean_std" | "raw"
+video_extractor = "openai/clip-vit-base-patch32" # google/vit-base-patch16-224 или "openai/clip-vit-base-patch32"
+yolo_weights = "src/data_loading/best_YOLO.pt"
+segment_length = 30  # сколько кадров отобрать из всех возможных с равномерным шагом
+image_size = 224          # ширина и высота изображения
+emb_normalize = false
+
+[cache]
+per_modality_cache = true
+overwrite_modality_cache = false
+force_reextract = []      # можно ["audio", "face"] чтобы форсить только их
+preprocess_version = "v1" # если меняется get_metadata/препроц
