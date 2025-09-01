@@ -30,7 +30,7 @@ class ClipVideoExtractor:
         self.proc  = CLIPProcessor.from_pretrained(model_name)
 
     def fingerprint(self) -> str:
-        return f"clipv:{self.model_name}:{self.output_mode}"
+        return f"clipv:{self.model_name}"
 
     @torch.no_grad()
     def extract(self, *, pixel_values: torch.Tensor | None = None,

@@ -13,14 +13,22 @@ from src.utils.feature_store import FeatureStore, build_cache_key, need_full_ree
 
 
 class WSMBodyDataset(Dataset):
+    """
+    Сегмент = независимое видео.
+    CSV обязан содержать колонки: video_id, diagnosis, segment_file.
+    Пути к сегментам считаются по шаблону:
+        <video_dir>/<video_id>/segments/<segment_file>
+    где video_dir указывается в config.toml (например: E:/WSM/depression/{split}_labels).
+    """
+
     def __init__(
         self,
         csv_path: str,
         video_dir: str,
         config,
         split: str,
-        modality_processors: Dict[str, Any],        # должен содержать 'body'
-        modality_feature_extractors: Dict[str, Any],# должен содержать 'body'
+        modality_processors: Dict[str, Any],         # должен содержать 'body'
+        modality_feature_extractors: Dict[str, Any], # должен содержать 'body'
         dataset_name: str = "wsm",
         device: str = "cuda",
     ) -> None:
@@ -35,10 +43,10 @@ class WSMBodyDataset(Dataset):
         self.device     = device
 
         # параметры извлечения
-        self.segment_length   = int(getattr(config, "segment_length", 16))
-        self.subset_size      = int(getattr(config, "subset_size", 0) or 0)
-        self.average_features = str(getattr(config, "average_features", "raw"))  # 'raw'|'mean'|'mean_std'
-        self.yolo_weights     = str(getattr(config, "src/data_loading/best_YOLO.pt"))
+        self.segment_length   = config.segment_length
+        self.subset_size      = config.subset_size
+        self.average_features = config.average_features  # 'raw'|'mean'|'mean_std'
+        self.yolo_weights     = config.yolo_weights
 
         # процессоры/экстракторы (только body)
         self.proc = modality_processors.get("body", None)
@@ -49,19 +57,23 @@ class WSMBodyDataset(Dataset):
             raise ValueError("Нужен extractor для 'body' (CLIP/VIT).")
 
         # кэш
-        self.save_prepared_data = bool(getattr(config, "save_prepared_data", True))
-        self.save_feature_path  = str(getattr(config, "save_feature_path", "features_cache"))
+        self.save_prepared_data = config.save_prepared_data
+        self.save_feature_path  = config.save_feature_path
         self.store = FeatureStore(self.save_feature_path)
 
         # CSV
         df = pd.read_csv(self.csv_path)
-        if "video_name" not in df.columns or "label" not in df.columns:
-            raise ValueError("CSV должен содержать столбцы 'video_name' и 'label'.")
+        required = {"video_id", "diagnosis", "segment_file"}
+        missing = required - set(df.columns)
+        if missing:
+            raise ValueError(f"CSV должен содержать столбцы {sorted(required)}. Отсутствуют: {sorted(missing)}")
         if self.subset_size > 0:
             df = df.head(self.subset_size)
-            logging.info(f"[WSMBodyDataset] subset_size={self.subset_size}, rows={len(df)}")
+        logging.info(
+            f"[WSMBodyDataset] {self.dataset_name}/{self.split}: "
+            f"subset_size={self.subset_size} -> rows={len(df)}"
+        )
         self.df = df
-        self.video_names = sorted(self.df["video_name"].astype(str).unique())
 
         self.corpus = self._detect_corpus(self.csv_path, self.video_dir)
 
@@ -101,29 +113,40 @@ class WSMBodyDataset(Dataset):
             return 2 if raw == 1 else 0
         return 0
 
-
-    def _find_file(self, base_dir: str, base_filename: str) -> Optional[str]:
-        target = os.path.splitext(base_filename)[0]
-        for root, _, files in os.walk(base_dir):
-            for file in files:
-                if os.path.splitext(file)[0] == target:
-                    return os.path.join(root, file)
-        return None
+    def _segment_path(self, base_dir: str, video_id: str, segment_file: str) -> str:
+        """
+        Идеальные условия: сегменты всегда по шаблону
+            <base_dir>/<video_id>/segments/<segment_file>
+        Абсолютные пути не ожидаем и не поддерживаем.
+        """
+        p = os.path.join(base_dir, str(video_id), "segments", segment_file)
+        if not os.path.exists(p):
+            raise FileNotFoundError(f"Ожидал сегмент по пути: {p}")
+        return p
 
     def _build_meta_only(self) -> None:
         self.meta = []
-        for name in tqdm(self.video_names, desc="Indexing WSM"):
-            vpath = self._find_file(self.video_dir, name)
-            if vpath is None:
-                logging.warning(f"❌ Видео не найдено: {name}")
-                continue
-            raw = self.df.loc[self.df["video_name"] == name, "label"].values[0]
-            class_id = self._map_label(int(raw))
+        for _, row in tqdm(self.df.iterrows(), total=len(self.df),
+                           desc=f"Indexing WSM segments [{self.dataset_name}/{self.split}]"):
+            vid = str(row["video_id"])
+            seg = str(row["segment_file"])
+            vpath = self._segment_path(self.video_dir, vid, seg)
+
+            class_id = self._map_label(int(row["diagnosis"]))
+
+            # У тебя нет коллизий имён — берём stem(segment_file)
+            sample_name = os.path.splitext(os.path.basename(seg))[0]
+
             self.meta.append({
-                "sample_name": name,
+                "sample_name": sample_name,
                 "video_path": vpath,
                 "label": int(class_id),
             })
+
+        logging.info(
+            f"[WSMBodyDataset] {self.dataset_name}/{self.split}: "
+            f"indexed segments={len(self.meta)} / rows={len(self.df)}"
+        )
 
     # ─────────────────── feature caching ─────────────────── #
 
@@ -146,9 +169,16 @@ class WSMBodyDataset(Dataset):
         if not missing:
             return
 
-        for name in tqdm(missing, desc=f"Extracting {mod}"):
+        # быстрый индекс name -> vpath
+        path_by_name = {m["sample_name"]: m["video_path"] for m in self.meta}
+
+        for name in tqdm(
+            missing,
+            desc=f"Extracting {mod} [{self.dataset_name}/{self.split}]",
+            leave=True
+        ):
             try:
-                vpath = self._find_file(self.video_dir, name)
+                vpath = path_by_name.get(name)
                 if not vpath:
                     store[name] = None
                     continue
@@ -178,8 +208,8 @@ class WSMBodyDataset(Dataset):
     def _aggregate(self, feats: Any, average: str) -> Optional[dict]:
         """
         feats: {'embedding': Tensor [T,D] или [D]}
-        'raw'  -> {'seq': [T,D]}
-        'mean' -> {'mean': [D]}
+        'raw'      -> {'seq': [T,D]}
+        'mean'     -> {'mean': [D]}
         'mean_std' -> {'mean':[D],'std':[D]}
         """
         if not isinstance(feats, dict):
@@ -207,7 +237,7 @@ class WSMBodyDataset(Dataset):
         base = self.meta[idx]
         name = base["sample_name"]
 
-        # достаем из кэша
+        # достаём из кэша
         features = {}
         key = build_cache_key("body", self.extr, self.config)
         cache = self.store.get_store(

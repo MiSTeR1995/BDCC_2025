@@ -40,7 +40,7 @@ def make_wsm_dataset_and_loader(config, split: str) -> Tuple[ConcatDataset, Data
         csv_path  = ds_cfg["csv_path"].format(base_dir=ds_cfg["base_dir"], split=split)
         video_dir = ds_cfg["video_dir"].format(base_dir=ds_cfg["base_dir"], split=split)
         if not os.path.exists(csv_path):
-            # молча пропускаем отсутствующий split
+            print(f"[WSM] skip {ds_name} for split={split}: CSV not found -> {csv_path}")
             continue
 
         ds = WSMBodyDataset(
@@ -59,12 +59,11 @@ def make_wsm_dataset_and_loader(config, split: str) -> Tuple[ConcatDataset, Data
         raise ValueError(f"Для split='{split}' не найдено ни одного корпуса WSM.")
 
     dataset = ds_list[0] if len(ds_list) == 1 else ConcatDataset(ds_list)
-
     loader = DataLoader(
         dataset,
-        batch_size=getattr(config, "batch_size", 32),
+        batch_size=config.batch_size,
         shuffle=(split == "train"),
-        num_workers=getattr(config, "num_workers", 0),
+        num_workers=config.num_workers,
         collate_fn=wsm_collate_fn,
     )
     return dataset, loader

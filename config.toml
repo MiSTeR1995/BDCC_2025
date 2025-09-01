@@ -5,14 +5,14 @@
 # Паркинсон
 [datasets.wsm_parkinson]
 base_dir = "E:/WSM/"
-csv_path = "{base_dir}/parkinson/{split}_labels.csv"
+csv_path = "{base_dir}/parkinson/{split}_labels_segments_min_filtered.csv"
 video_dir = "{base_dir}/parkinson/{split}_labels/"
 
 
 # Депрессия
 [datasets.wsm_depression]
 base_dir = "E:/WSM/"
-csv_path = "{base_dir}/depression/{split}_labels.csv"
+csv_path = "{base_dir}/depression/{split}_labels_segments_min_filtered.csv"
 video_dir = "{base_dir}/depression/{split}_labels/"
 
 # ---------------------------
@@ -21,7 +21,7 @@ video_dir = "{base_dir}/depression/{split}_labels/"
 [dataloader]
 num_workers = 0
 shuffle = true
-prepare_only = true      # только извлечение признаков, без обучения
+prepare_only = false      # только извлечение признаков, без обучения
 
 # ---------------------------
 # Общие параметры тренировки
@@ -46,12 +46,23 @@ add_similarity = true     # считает косинусное сходство
 # Параметры модели
 # ---------------------------
 [train.model]
-experiment_name            = "MultiModalFusionModel" # название модели
+# какую модель используем: "mamba" или "transformer"
+model_name                  = "transformer"
+
 hidden_dim            = 256      # размер скрытого состояния
+out_features          = 256      # размер финальных признаков перед классификацией
+dropout               = 0.2      # dropout между слоями
+
+# ---- параметры для VideoFormer ----
 num_transformer_heads = 8        # количество attention голов в трансформере
 positional_encoding   = false    # использовать ли позиционное кодирование
-dropout               = 0.2     # dropout между слоями
-out_features          = 256      # размер финальных признаков перед классификацией
+tr_layers             = 2        # число transformer-блоков
+
+# ---- параметры для VideoMamba ----
+mamba_d_state         = 8        # внутреннее состояние mamba
+mamba_ker_size        = 3        # размер kernel
+mamba_layers          = 2        # число mamba-блоков
+# mamba_d_discr         = 64       # discr dim (если не нужен — null)
 
 # ---------------------------
 # Параметры оптимизатора
@@ -70,11 +81,10 @@ scheduler_type = "plateau" # тип шедулера: "none", "plateau", "cosine
 warmup_ratio = 0.1         # отношение количества warmup-итераций к общему числу шагов (0.1 = 10%)
 
 [embeddings]
-average_features = "mean_std" # Усредненние фичей - "mean"| "mean_std" | "raw"
+average_features = "raw" # Усредненние фичей - "mean"| "mean_std" | "raw"
 video_extractor = "openai/clip-vit-base-patch32" # google/vit-base-patch16-224 или "openai/clip-vit-base-patch32"
-yolo_weights = "src/data_loading/best_YOLO.pt"
+yolo_weights = "./src/data_loading/best_YOLO.pt"
 segment_length = 30  # сколько кадров отобрать из всех возможных с равномерным шагом
-image_size = 224          # ширина и высота изображения
 emb_normalize = false
 
 [cache]

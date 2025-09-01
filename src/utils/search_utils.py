@@ -92,11 +92,11 @@ def greedy_search(
 ):
     current_best_params   = copy.deepcopy(default_values)
     all_param_names       = list(param_grid.keys())
-    experiment_name            = base_config.experiment_name
+    model_name            = base_config.model_name
     selection_metric      = base_config.selection_metric
     with open(overrides_file, "a", encoding="utf-8") as f:
         f.write("=== Жадный (поэтапный) перебор гиперпараметров (Dev-based) ===\n")
-        f.write(f"Эксперимент: {experiment_name}\n")
+        f.write(f"Модель: {model_name}\n")
 
     for i, param_name in enumerate(all_param_names):
         candidates     = param_grid[param_name]
@@ -193,7 +193,7 @@ def exhaustive_search(
 
     with open(overrides_file, "a", encoding="utf-8") as f:
         f.write("=== Полный перебор гиперпараметров (Dev-based) ===\n")
-        f.write(f"Эксперимент: {base_config.experiment_name}\n")
+        f.write(f"Модель: {base_config.model_name}\n")
 
     best_config = None
     best_score  = float("-inf")

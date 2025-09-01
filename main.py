@@ -37,9 +37,9 @@ def main():
     # ──────────────────── 1. Конфиг и директории ────────────────────
     base_config = ConfigLoader("config.toml")
 
-    experiment_name = base_config.experiment_name.replace("/", "_").replace(" ", "_").lower()
+    model_name = base_config.model_name.replace("/", "_").replace(" ", "_").lower()
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    results_dir = f"results/results_{experiment_name}_{timestamp}"
+    results_dir = f"results/results_{model_name}_{timestamp}"
     os.makedirs(results_dir, exist_ok=True)
 
     base_config.checkpoint_dir = os.path.join(results_dir, "checkpoints")
@@ -104,15 +104,13 @@ def main():
         test_loader = dev_loader
 
     # ──────────────────── 5. Режим prepare_only ────────────────────
-    if getattr(base_config, "prepare_only", False):
+    if base_config.prepare_only:
         logging.info("== Режим prepare_only: только подготовка данных и кэша, без обучения ==")
         return
 
     # ──────────────────── 6. Поиск/обучение ────────────────────────
-    # Для совместимости оставим твои режимы 'greedy'/'exhaustive'/'none'
-    search_type = getattr(base_config, "search_type", "none").lower()
+    search_type = base_config.search_type
 
-    # Для тренера нужны dev/test в виде словаря (по аналогии со старым кодом)
     dev_loaders  = {"wsm": dev_loader}
     test_loaders = {"wsm": test_loader}
 

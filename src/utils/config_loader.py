@@ -55,13 +55,24 @@ class ConfigLoader:
         # Тренировка: параметры модели
         # ---------------------------
         train_model = self.config.get("train", {}).get("model", {})
-        self.experiment_name = train_model.get("experiment_name", "MyExperiment")
+
+        # общее
+        self.model_name = train_model.get("model_name", "mamba")  # "mamba" или "transformer"
+        self.model_name = train_model.get("model_name", "mamba")
         self.hidden_dim = train_model.get("hidden_dim", 256)
-        self.num_transformer_heads = train_model.get("num_transformer_heads", 8)
-        self.num_graph_heads = train_model.get("num_graph_heads", 8)
-        self.positional_encoding = train_model.get("positional_encoding", True)
         self.dropout = train_model.get("dropout", 0.15)
         self.out_features = train_model.get("out_features", 128)
+
+        # transformer-специфика
+        self.num_transformer_heads = train_model.get("num_transformer_heads", 8)
+        self.positional_encoding   = train_model.get("positional_encoding", True)
+        self.tr_layers             = train_model.get("tr_layers", 2)
+
+        # mamba-специфика
+        self.mamba_d_state   = train_model.get("mamba_d_state", 8)
+        self.mamba_ker_size  = train_model.get("mamba_ker_size", 3)
+        self.mamba_layers    = train_model.get("mamba_layers", 2)
+        self.mamba_d_discr   = train_model.get("mamba_d_discr", None)  # можно оставить None
 
         # ---------------------------
         # Тренировка: оптимизатор
@@ -87,7 +98,6 @@ class ConfigLoader:
         self.video_extractor = emb_cfg.get("video_extractor", "off")
         self.yolo_weights = emb_cfg.get("yolo_weights", "src/data_loading/best_YOLO.pt")
         self.segment_length = emb_cfg.get("segment_length", 20)
-        self.image_size = emb_cfg.get("image_size", 224)
         self.emb_normalize = emb_cfg.get("emb_normalize", True)
 
         # ---------------------------
@@ -116,10 +126,8 @@ class ConfigLoader:
         # Логируем обучающие параметры
         logging.info("--- Training Config ---")
         logging.info(f"DataLoader: batch_size={self.batch_size}, num_workers={self.num_workers}, shuffle={self.shuffle}")
-        logging.info(f"Experiment Name: {self.experiment_name}")
+        logging.info(f"Model Name: {self.model_name}")
         logging.info(f"Random Seed: {self.random_seed}")
-        logging.info(f"Hidden Dim: {self.hidden_dim}")
-        logging.info(f"Num Heads in Transformer: {self.num_transformer_heads}")
         logging.info(f"Optimizer: {self.optimizer}")
         logging.info(f"Scheduler Type: {self.scheduler_type}")
         logging.info(f"Warmup Ratio: {self.warmup_ratio}")
