@@ -39,7 +39,7 @@ search_type = "exhaustive"        # стратегия поиска: "greedy", "
 early_stop_on = "test"            # dev или "test" набор для оптимизации параметров обучения
 checkpoint_dir = "checkpoints"
 device = "cuda"           # "cuda" или "cpu", куда грузить модель
-selection_metric = "mean_all"   # по какой метрике отслеживаем mean_emo или "mF1", "mUAR", "ACC" … mean_combo
+selection_metric = "UAR"   # по какой метрике отслеживаем
 add_similarity = true     # считает косинусное сходство эмбеддингов модальностей (или эмбеддинга к некоторому «гайд-банку»/прототипам классов). Используется в MultiModalFusionModel
 
 # ---------------------------
@@ -47,11 +47,11 @@ add_similarity = true     # считает косинусное сходство
 # ---------------------------
 [train.model]
 # какую модель используем: "mamba" или "transformer"
-model_name                  = "transformer"
+model_name            = "mamba"
 
 hidden_dim            = 256      # размер скрытого состояния
 out_features          = 256      # размер финальных признаков перед классификацией
-dropout               = 0.2      # dropout между слоями
+dropout               = 0.15      # dropout между слоями
 
 # ---- параметры для VideoFormer ----
 num_transformer_heads = 8        # количество attention голов в трансформере
@@ -77,7 +77,7 @@ momentum = 0.9            # momentum (используется только в S
 # Параметры шедулера
 # ---------------------------
 [train.scheduler]
-scheduler_type = "plateau" # тип шедулера: "none", "plateau", "cosine", "onecycle" ил  и HuggingFace-стиль ("huggingface_linear", "huggingface_cosine" "huggingface_cosine_with_restarts" и т.д.)
+scheduler_type = "none" # тип шедулера: "none", "plateau", "cosine", "onecycle" ил  и HuggingFace-стиль ("huggingface_linear", "huggingface_cosine" "huggingface_cosine_with_restarts" и т.д.)
 warmup_ratio = 0.1         # отношение количества warmup-итераций к общему числу шагов (0.1 = 10%)
 
 [embeddings]

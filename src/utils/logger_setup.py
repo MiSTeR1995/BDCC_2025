@@ -46,24 +46,64 @@ def setup_logger(level=logging.INFO, log_file=None):
     logger.setLevel(level)
     return logger
 
+
 def color_metric(metric_name, value):
+    """
+    Красит ключ-значение метрики. Добавлена поддержка UAR/MF1 и всех recall_*.
+    Старые цвета оставлены как есть.
+    """
+    # базовые ANSI
+    END = "\033[0m"
+    GRAY = "\033[90m"
+    CYAN = "\033[36m"
+    YELLOW = "\033[33m"
+    MAGENTA = "\033[35m"
+    BLUE = "\033[34m"
+    GREEN = "\033[32m"
+
     COLORS = {
         "mF1": "\033[96m",
-        "mUAR": "\033[91m",      # бирюзовый / голубой (акустическая нейтральность)
-        "ACC": "\033[32m",       # зелёный (интерпретируемо как «норм»)
-        "CCC": "\033[33m",       # жёлтый (слегка тревожный — континуальный выход)
-        "mean_emo": "\033[1;34m",# жирно-синий (важная агрегированная)
-        "mean_pkl": "\033[1;35m" # жирно-фиолетовый (вторая агрегированная)
+        "mUAR": "\033[91m",
+        "ACC": "\033[32m",
+        "CCC": "\033[33m",
+        "UAR": "\033[1;34m",
+        "MF1": "\033[1;35m",
     }
-    END = "\033[0m"
+
+    # сначала пробуем прямое сопоставление
     color = COLORS.get(metric_name, "")
-    return f"{color}{metric_name}:{value:.4f}{END}"
+
+    # если это per-class recall_* — красим по индексу класса (c0/c1/c2/…)
+    if not color and metric_name.lower().startswith("recall_"):
+        import re
+        m = re.search(r"recall_c(\d+)", metric_name.lower())
+        c_idx = int(m.group(1)) if m else None
+        if c_idx == 0:
+            color = CYAN
+        elif c_idx == 1:
+            color = YELLOW
+        elif c_idx == 2:
+            color = MAGENTA
+        else:
+            color = GRAY
+
+    try:
+        return f"{color}{metric_name}:{float(value):.4f}{END}" if color else f"{metric_name}:{float(value):.4f}"
+    except Exception:
+        # на всякий случай, если value не число
+        return f"{color}{metric_name}={value}{END}" if color else f"{metric_name}={value}"
+
 
 def color_split(name: str) -> str:
+    """
+    Возвращает раскрашенный тег сплита. Поддерживает верхний регистр:
+    TRAIN / DEV / TEST (как у тебя в логах).
+    """
     SPLIT_COLORS = {
         "TRAIN": "\033[1;33m",  # ярко-жёлтый
-        "Dev":   "\033[1;31m",  # ярко-синий
-        "Test":  "\033[1;35m",  # ярко-фиолетовый
+        "DEV":   "\033[1;34m",  # ярко-синий
+        "TEST":  "\033[1;35m",  # ярко-фиолетовый
     }
     END = "\033[0m"
-    return f"{SPLIT_COLORS.get(name, '')}{name}{END}"
+    key = name.upper()
+    return f"{SPLIT_COLORS.get(key, '')}{name}{END}"

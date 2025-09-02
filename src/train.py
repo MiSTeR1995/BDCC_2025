@@ -3,7 +3,8 @@
 from __future__ import annotations
 import logging, os
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
+from lion_pytorch import Lion
 
 import numpy as np
 import torch
@@ -14,7 +15,14 @@ from sklearn.utils.class_weight import compute_class_weight
 from sklearn.metrics import f1_score, recall_score
 
 from src.models.models import VideoMamba, VideoFormer
+from src.utils.logger_setup import color_metric, color_split
+from src.utils.schedulers import SmartScheduler
 
+CLASS_LABELS = {
+    0: "control",
+    1: "depression",
+    2: "parkinson",
+}
 
 # ───────────────────────── utils ─────────────────────────
 
@@ -87,9 +95,10 @@ def _metrics(y_true: np.ndarray, y_pred: np.ndarray, num_classes: int) -> Dict[s
     mf1 = f1_score(y_true, y_pred, average="macro", zero_division=0)
     uar = recall_score(y_true, y_pred, average="macro", zero_division=0)  # UAR = macro recall
     per_cls = recall_score(y_true, y_pred, average=None, labels=list(range(num_classes)), zero_division=0)
-    out = {"MF1": float(mf1), "UAR": float(uar)}
+    out: Dict[str, float] = {"MF1": float(mf1), "UAR": float(uar)}
     for c, r in enumerate(per_cls):
-        out[f"recall_c{c}"] = float(r)
+        name = CLASS_LABELS.get(c, f"class{c}")
+        out[f"recall_c{c}_{name}"] = float(r)
     return out
 
 
@@ -149,6 +158,26 @@ def _eval_epoch(model: nn.Module, loader: DataLoader, device: torch.device,
     y_pred = torch.cat(all_p).numpy()
     return _metrics(y_true, y_pred, num_classes)
 
+# ───────────────────────── helpers for early stopping ──────────────────────
+
+def _score_for_split(metrics_map: Dict[str, float], selection_metric: str) -> float:
+    """
+    Берём среднее по всем ключам вида '{selection_metric}_<dataset>'.
+    Если таких ключей нет — пытаемся взять прямой ключ selection_metric.
+    Если и его нет — fallback: UAR -> MF1 -> -1.
+    """
+    if not metrics_map:
+        return -1.0
+    pref = f"{selection_metric}_"
+    vals = [v for k, v in metrics_map.items() if isinstance(v, (int, float)) and k.startswith(pref)]
+    if vals:
+        return float(np.mean(vals))
+    if selection_metric in metrics_map and isinstance(metrics_map[selection_metric], (int, float)):
+        return float(metrics_map[selection_metric])
+    for k in ("UAR", "MF1"):
+        if k in metrics_map and isinstance(metrics_map[k], (int, float)):
+            return float(metrics_map[k])
+    return -1.0
 
 # ───────────────────────── train loop ─────────────────────
 
@@ -159,10 +188,9 @@ def train(
     test_loaders: Dict[str, DataLoader] | None = None,
 ):
     """
-    CE + class weights + UAR/MF1 + per-class recall.
-    Используем VideoMamba/VideoFormer. Фичи: mean / mean_std / raw (seq → mean внутри этого хелпера).
+    CE + class weights + UAR/MF1 + per-class recall (с подписями).
+    Цветные логи и ранняя остановка по cfg.selection_metric на cfg.early_stop_on (dev|test).
     """
-    # cfg.<param> — как ты и просил
     seed_everything(cfg.random_seed)
     device = torch.device(cfg.device)
     avg_mode = cfg.average_features.lower()
@@ -175,7 +203,7 @@ def train(
             break
     if first is None:
         raise RuntimeError("train loader пустой (или collate всё фильтрует).")
-    X0, keep0 = _stack_body_features(first["features"], avg_mode)  # [B0, D’]
+    X0, _ = _stack_body_features(first["features"], avg_mode)  # [B0, D’]
     in_dim = int(X0.shape[1])
     seq_len = 1
 
@@ -192,11 +220,39 @@ def train(
 
     # модель/опт/лосс
     model = _build_model(cfg, in_dim, seq_len, num_classes, device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+
+
+    # ─── Оптимизатор ──────────────────────────────────────────────────
+    if cfg.optimizer == "adam":
+        optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+    elif cfg.optimizer == "adamw":
+        optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+    elif cfg.optimizer == "lion":
+        optimizer = Lion(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+    elif cfg.optimizer == "sgd":
+        optimizer = torch.optim.SGD(model.parameters(), lr=cfg.lr, momentum=cfg.momentum)
+    elif cfg.optimizer == "rmsprop":
+        optimizer = torch.optim.RMSprop(model.parameters(), lr=cfg.lr)
+    else:
+        raise ValueError(f"⛔ Неизвестный оптимизатор: {cfg.optimizer}")
+    logging.info(f"⚙️ Оптимизатор: {cfg.optimizer}, learning rate: {cfg.lr}")
+
+    # ─── Scheduler ────────────────────────────────────────────────────
+    steps_per_epoch = sum(1 for b in mm_loader if b is not None)
+    scheduler = SmartScheduler(
+        scheduler_type=cfg.scheduler_type,
+        optimizer=optimizer,
+        config=cfg,
+        steps_per_epoch=steps_per_epoch
+    )
+
     criterion = nn.CrossEntropyLoss(weight=ce_weights)
 
-    # цикл эпох
-    best_dev_score = -1.0
+    # конфиг для ранней остановки/выбора лучшего
+    selection_metric = cfg.selection_metric
+    early_stop_on = cfg.early_stop_on
+
+    best_score = -1.0
     best_dev, best_test = {}, {}
     patience = 0
 
@@ -220,6 +276,7 @@ def train(
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
+            scheduler.step(batch_level=True)
 
             bs = y.size(0)
             tot_loss += loss.item() * bs
@@ -232,44 +289,52 @@ def train(
         tr_p_np = torch.cat(tr_p).numpy() if tr_p else np.array([])
         if tr_y_np.size > 0:
             m_tr = _metrics(tr_y_np, tr_p_np, num_classes)
-            logging.info(
-                f"[TRAIN] Loss={train_loss:.4f} | UAR={m_tr['UAR']:.4f} MF1={m_tr['MF1']:.4f} "
-                + " ".join(f"R{c}={m_tr[f'recall_c{c}']:.3f}" for c in range(num_classes))
-            )
+            parts = [
+                f"Loss={train_loss:.4f}",
+                color_metric("UAR", m_tr["UAR"]),
+                color_metric("MF1", m_tr["MF1"]),
+            ]
+            for c in range(num_classes):
+                key = f"recall_c{c}_{CLASS_LABELS.get(c, f'class{c}')}"
+                if key in m_tr:
+                    parts.append(color_metric(key, m_tr[key]))
+            logging.info(f"[{color_split('TRAIN')}] " + " | ".join(parts))
         else:
-            logging.info(f"[TRAIN] Loss={train_loss:.4f} | (пустые метрики)")
+            logging.info(f"[{color_split('TRAIN')}] Loss={train_loss:.4f} | (пустые метрики)")
 
-        # eval
+        # ── Оценка DEV/TEST с пер-датасетными ключами ──
         cur_dev = {}
         if dev_loaders:
             for name, ldr in dev_loaders.items():
                 md = _eval_epoch(model, ldr, device, avg_mode, num_classes)
                 if md:
                     cur_dev.update({f"{k}_{name}": v for k, v in md.items()})
-                    logging.info(f"[DEV:{name}] " + " ".join(f"{k}={v:.4f}" for k, v in md.items()))
+                    msg = " · ".join(color_metric(k, v) for k, v in md.items())
+                    logging.info(f"[{color_split('DEV')}:{name}] {msg}")
+
         cur_test = {}
         if test_loaders:
             for name, ldr in test_loaders.items():
                 mt = _eval_epoch(model, ldr, device, avg_mode, num_classes)
                 if mt:
                     cur_test.update({f"{k}_{name}": v for k, v in mt.items()})
-                    logging.info(f"[TEST:{name}] " + " ".join(f"{k}={v:.4f}" for k, v in mt.items()))
+                    msg = " · ".join(color_metric(k, v) for k, v in mt.items())
+                    logging.info(f"[{color_split('TEST')}:{name}] {msg}")
 
-        # ранняя остановка по среднему dev UAR
-        if cur_dev:
-            dev_uars = [v for k, v in cur_dev.items() if k.startswith("UAR_")]
-            score = float(np.mean(dev_uars)) if dev_uars else -1.0
-        else:
-            score = -1.0
+        # ── Ранняя остановка по cfg.selection_metric на сплите cfg.early_stop_on ──
+        eval_map = cur_dev if early_stop_on == "dev" else cur_test
+        score = _score_for_split(eval_map, selection_metric)
 
-        if score > best_dev_score:
-            best_dev_score = score
+        scheduler.step(score)
+
+        if score > best_score:
+            best_score = score
             best_dev, best_test = cur_dev, cur_test
             patience = 0
             os.makedirs(cfg.checkpoint_dir, exist_ok=True)
-            ckpt = Path(cfg.checkpoint_dir) / f"best_ep{epoch+1}_uar{best_dev_score:.4f}.pt"
+            ckpt = Path(cfg.checkpoint_dir) / f"best_ep{epoch+1}_{early_stop_on}_{selection_metric}_{best_score:.4f}.pt"
             torch.save(model.state_dict(), ckpt)
-            logging.info(f"✔ Saved best model: {ckpt.name}")
+            logging.info(f"✔ Saved best model ({early_stop_on}/{selection_metric}={best_score:.4f}): {ckpt.name}")
         else:
             patience += 1
             if patience >= cfg.max_patience:
