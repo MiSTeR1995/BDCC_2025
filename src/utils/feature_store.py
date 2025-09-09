@@ -54,9 +54,15 @@ def build_cache_key(mod: str, extractor: Any, cfg: Any) -> CacheKey:
     avg = str(getattr(cfg, "average_features", "raw")).lower()
     frames = int(getattr(cfg, "segment_length", 30))
     pre_v = str(getattr(cfg, "preprocess_version", "v1"))
+    mode   = str(getattr(cfg, "video_mode", "stable"))
 
-    return CacheKey(mod="body", extractor_fp=extractor_fp, avg=avg,
-                    frames=frames, pre_v=pre_v)
+    return CacheKey(
+        mod="body",
+        extractor_fp=extractor_fp,
+        avg=avg,
+        frames=frames,
+        pre_v=f"{pre_v}-{mode}",   # закодируем в pre_v
+    )
 
 
 # ---------------------------

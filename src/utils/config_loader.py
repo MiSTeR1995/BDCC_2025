@@ -50,6 +50,7 @@ class ConfigLoader:
         self.device = train_general.get("device", "cuda")
         self.selection_metric = train_general.get("selection_metric", "mean_combo")
         self.add_similarity = train_general.get("add_similarity", True)
+        self.class_weighting = train_general.get("class_weighting", "balanced")
 
         # ---------------------------
         # Тренировка: параметры модели
@@ -97,6 +98,7 @@ class ConfigLoader:
         self.average_features = emb_cfg.get("average_features", "mean_std")
         self.video_extractor = emb_cfg.get("video_extractor", "off")
         self.yolo_weights = emb_cfg.get("yolo_weights", "src/data_loading/best_YOLO.pt")
+        self.video_mode = emb_cfg.get("video_mode", "stable")
         self.segment_length = emb_cfg.get("segment_length", 20)
         self.emb_normalize = emb_cfg.get("emb_normalize", True)
 

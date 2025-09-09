@@ -47,6 +47,7 @@ class WSMBodyDataset(Dataset):
         self.subset_size      = config.subset_size
         self.average_features = config.average_features  # 'raw'|'mean'|'mean_std'
         self.yolo_weights     = config.yolo_weights
+        self.video_mode       = config.video_mode
 
         # процессоры/экстракторы (только body)
         self.proc = modality_processors.get("body", None)
@@ -190,6 +191,7 @@ class WSMBodyDataset(Dataset):
                     image_processor=self.proc,
                     device=self.device,
                     yolo_weights=self.yolo_weights,
+                    mode=self.video_mode,
                 )
 
                 feats = ex.extract(pixel_values=body_pv) if body_pv is not None else None

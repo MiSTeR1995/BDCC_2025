@@ -212,11 +212,16 @@ def train(
     except AttributeError:
         num_classes = _num_classes_from_loader(mm_loader, avg_mode)
 
-    # class weights (balanced)
-    y_all = _gather_all_labels(mm_loader, avg_mode)
-    classes = np.arange(num_classes)
-    class_weights = compute_class_weight(class_weight="balanced", classes=classes, y=y_all)
-    ce_weights = torch.tensor(class_weights, dtype=torch.float32, device=device)
+    # ─── class weights ──────────────────────────────────────────────
+    if cfg.class_weighting == "none":
+        ce_weights = None
+        logging.info("⚖️ Class weighting: none (веса отключены)")
+    else:
+        y_all = _gather_all_labels(mm_loader, avg_mode)
+        classes = np.arange(num_classes)
+        class_weights = compute_class_weight(class_weight="balanced", classes=classes, y=y_all)
+        ce_weights = torch.tensor(class_weights, dtype=torch.float32, device=device)
+        logging.info(f"⚖️ Class weighting: balanced → {class_weights.tolist()}")
 
     # модель/опт/лосс
     model = _build_model(cfg, in_dim, seq_len, num_classes, device)

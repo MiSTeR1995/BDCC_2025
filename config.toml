@@ -41,6 +41,7 @@ checkpoint_dir = "checkpoints"
 device = "cuda"           # "cuda" или "cpu", куда грузить модель
 selection_metric = "UAR"   # по какой метрике отслеживаем
 add_similarity = true     # считает косинусное сходство эмбеддингов модальностей (или эмбеддинга к некоторому «гайд-банку»/прототипам классов). Используется в MultiModalFusionModel
+class_weighting = "balanced" # "none"
 
 # ---------------------------
 # Параметры модели
@@ -69,21 +70,22 @@ mamba_layers          = 2        # число mamba-блоков
 # ---------------------------
 [train.optimizer]
 optimizer = "adam"        # тип оптимизатора: "adam", "adamw", "lion", "sgd", "rmsprop"
-lr = 1e-4                 # начальная скорость обучения
-weight_decay = 1e-5        # weight decay для регуляризации
+lr = 1e-5                 # начальная скорость обучения
+weight_decay = 0.0        # weight decay для регуляризации
 momentum = 0.9            # momentum (используется только в SGD)
 
 # ---------------------------
 # Параметры шедулера
 # ---------------------------
 [train.scheduler]
-scheduler_type = "none" # тип шедулера: "none", "plateau", "cosine", "onecycle" ил  и HuggingFace-стиль ("huggingface_linear", "huggingface_cosine" "huggingface_cosine_with_restarts" и т.д.)
+scheduler_type = "plateau" # тип шедулера: "none", "plateau", "cosine", "onecycle" ил  и HuggingFace-стиль ("huggingface_linear", "huggingface_cosine" "huggingface_cosine_with_restarts" и т.д.)
 warmup_ratio = 0.1         # отношение количества warmup-итераций к общему числу шагов (0.1 = 10%)
 
 [embeddings]
 average_features = "raw" # Усредненние фичей - "mean"| "mean_std" | "raw"
 video_extractor = "openai/clip-vit-base-patch32" # google/vit-base-patch16-224 или "openai/clip-vit-base-patch32"
 yolo_weights = "./src/data_loading/best_YOLO.pt"
+video_mode = "stable" # "stable" (track) | "fast" (predict)
 segment_length = 30  # сколько кадров отобрать из всех возможных с равномерным шагом
 emb_normalize = false
 
